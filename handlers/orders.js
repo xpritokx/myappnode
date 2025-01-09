@@ -1,3 +1,5 @@
+let excelDateConvertor = require('../helpers/excel-date-convertor');
+
 let Orders = [{
         ID: 37053,
         OrderNum: 27230,
@@ -171,17 +173,64 @@ let Orders = [{
 let getOrders = async (req, res, next) => {
     const pageSize = req.query.pageSize || 25;
     const pageIndex = req.query.pageIndex || 0;
+    const sortingColumn = req.query.sortingColumn || 'OrderDate'
+    const sortingDirection = req.query.sortingDirection || 'desc';
 
     Promise.all([
         req.app.settings.db.query(`
-            SELECT COUNT(*) AS 'total' FROM Workorders;
+            SELECT COUNT(DISTINCT Workorders.OrderNum) AS 'total' FROM Workorders
         `),
         req.app.settings.db.query(`
-            SELECT TOP 200 * FROM Workorders;
+            WITH RankedRows AS (
+                SELECT
+                    OrdersTableView.OrderNum, 
+                    OrdersTableView.OrderDate,
+                    OrdersTableView.DeliveryDate,
+                    OrdersTableView.Address,
+                    OrdersTableView.JobNum,
+                    OrdersTableView.PONum,
+                    OrdersTableView.Status,
+                    OrdersTableView.WorkorderComments,
+                    OrdersTableView.StairsNum,
+                    OrdersTableView.InputBy,
+                    OrdersTableView.ShipDate,
+                    OrdersTableView.Model,
+                    OrdersTableView.Customer,
+                    ROW_NUMBER() OVER (PARTITION BY OrderNum ORDER BY OrdersTableView.ID) AS rn
+                FROM OrdersTableView
+            )
+            SELECT 
+                RankedRows.OrderNum, 
+                RankedRows.OrderDate,
+                RankedRows.DeliveryDate,
+                RankedRows.Address,
+                RankedRows.JobNum,
+                RankedRows.PONum,
+                RankedRows.Status,
+                RankedRows.WorkorderComments,
+                RankedRows.StairsNum,
+                RankedRows.InputBy,
+                RankedRows.ShipDate,
+                RankedRows.Model,
+                RankedRows.Customer
+            FROM RankedRows
+            WHERE rn = 1
+            ORDER BY ${sortingColumn} ${sortingDirection}
+            OFFSET ${ pageSize * pageIndex } ROWS FETCH NEXT ${pageSize} ROWS ONLY;
         `)
     ]).then(result => {
         const total = result[0].recordset[0].total;
-        const data = result[1].recordset;
+        let data = result[1].recordset;
+
+        data = excelDateConvertor(data, [
+            'OrderDate',
+            'DeliveryDate',
+        ]);
+
+        data.map(item => {
+            if (item.ShipDate) item.ShipDate = new Date(item.ShipDate).toDateString();
+            return item;
+        });
 
         return res.status(200).send({
             total: total,
@@ -189,7 +238,7 @@ let getOrders = async (req, res, next) => {
         });
     }).catch(err => {
         return res.status(400).send({
-            error: 'Error happened during "Getting workorders" DB operation',
+            error: 'Error happened during \'Getting workorders\' DB operation',
             message: err.message
         });
     });
