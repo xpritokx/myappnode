@@ -286,8 +286,68 @@ const createOrder = async (req, res, next) => {
     });
 }
 
+const deleteOrder = async (req, res, next) => {
+    const params = req.params;
+
+    const orderNumber = params.orderNumber;
+
+    try {
+        deleteUncomplete = `DELETE FROM Uncomplete WHERE WONUM ${orderNumber}`;
+        deleteOrderExtensionsQuery = `DELETE FROM WorkOrderExtensions WHERE WONum ${orderNumber}`;
+        deleteOrdersQuery = `DELETE FROM Workorders WHERE WONUM ${orderNumber}`;
+    
+        await Promise.all([
+            req.app.settings.db.query(deleteOrdersQuery),
+            req.app.settings.db.query(deleteUncomplete),
+            req.app.settings.db.query(deleteOrderExtensionsQuery),
+        ]);
+        console.log(`--DEBUG-- orders with order number: ${orderNumber} were deleted`);
+    } catch (err) {
+        return res.status(400).send({
+            status: 'error',
+            message: err.message,
+            error: 'Error happened during \'Deleting order\' DB operation',
+        });
+    }
+
+    return res.status(200).send({
+        status: 'ok'
+    });
+}
+
+const deleteStair = async (req, res, next) => {
+    const params = req.params;
+
+    const stairNumber = params.stairNumber;
+
+    try {
+        deleteUncomplete = `DELETE FROM Uncomplete WHERE WOID ${stairNumber}`;
+        deleteOrderExtensionsQuery = `DELETE FROM WorkOrderExtensions WHERE WOID ${stairNumber}`;
+        deleteOrdersQuery = `DELETE FROM Workorders WHERE ID ${stairNumber}`;
+    
+        await Promise.all([
+            req.app.settings.db.query(deleteOrdersQuery),
+            req.app.settings.db.query(deleteUncomplete),
+            req.app.settings.db.query(deleteOrderExtensionsQuery),
+        ]);
+        console.log(`--DEBUG-- stair with order number: ${stairNumber} was deleted`);
+    } catch (err) {
+        return res.status(400).send({
+            status: 'error',
+            message: err.message,
+            error: 'Error happened during \'Deleting stair\' DB operation',
+        });
+    }
+
+    return res.status(200).send({
+        status: 'ok'
+    });
+}
+
 module.exports = {
     getOrders,
     createOrder,
     getOrdersByNumber,
+    deleteOrder,
+    deleteStair, 
 }
