@@ -5,11 +5,17 @@ const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const cors = require("cors");
 
+require('dotenv').config('.env');
+
 const routes = require('./routes/index');
 const authRoutes = require('./routes/auth');
 const ordersRoutes = require('./routes/orders');
 const modelsRoutes = require('./routes/models');
 const customersRoutes = require('./routes/customers');
+const stairTypesRoutes = require('./routes/stairTypes');
+const stairStylesRoutes = require('./routes/stairStyles');
+const riserTypesRoutes = require('./routes/riserTypes');
+const materialsRoutes = require('./routes/materials');
 
 const authHandler = require('./handlers/auth'); 
 
@@ -25,25 +31,31 @@ const corsOptions ={
 
 // SQL Server configuration
 const config_stairs_db = {
-    "user": "roman", // Database username
-    "password": "5356250", // Database password
-    "server": "192.168.1.155", // Server IP address
-    "database": "stairs", // Database name
+    "user": process.env.STAIRS_DB_USER, // Database username
+    "password": process.env.STAIRS_DB_PASS, // Database password
+    "server": process.env.STAIRS_DB_SERVER, // Server IP address
+    "database": process.env.STAIRS_DB_NAME, // Database name
     "options": {
         "encrypt": false // Disable encryption
-    }
+    },
+    "pool": {
+        "max": 10,
+        "min": 0,
+        "idleTimeoutMillis": 30000
+    },
 }
 
 const config_stairs_server_db = {
-    "user": "roman", // Database username
-    "password": "5356250", // Database password
-    "server": "192.168.1.155", // Server IP address
-    "database": "stairs_server", // Database name
+    "user": process.env.STAIRS_SERVER_DB_USER, // Database username
+    "password": process.env.STAIRS_SERVER_DB_PASS, // Database password
+    "server": process.env.STAIRS_SERVER_DB_SERVER, // Server IP address
+    "database": process.env.STAIRS_SERVER_DB_NAME, // Database name
     "options": {
         "encrypt": false // Disable encryption
     }
 }
 
+app.use(bodyParser({limit: '2mb'}));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(cookieParser());
@@ -64,6 +76,7 @@ sql.connect(config_stairs_server_db, err => {
     console.log("Connection to stairs_server DB is Successful!");
 });
 
+
 app.use(cors(corsOptions));
 
 app.post('/api/auth', (req, res) => { 
@@ -77,6 +90,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/models', modelsRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/customers', customersRoutes);
+app.use('/api/materials', materialsRoutes);
+app.use('/api/stairTypes', stairTypesRoutes);
+app.use('/api/riserTypes', riserTypesRoutes);
+app.use('/api/stairStyles', stairStylesRoutes);
 
 app.listen(port, () => {
     console.log(`Now listening on port ${port}`); 

@@ -1,6 +1,12 @@
 const excelDateConvertor = require('../helpers/excel-date-convertor');
 const getQueries = require('../queries');
 
+const updateStairsCount = (req, numberForUpdate, orderNum) => {
+    const updateOrdersQuery = `UPDATE Workorders SET StairsNum=${numberForUpdate} WHERE OrderNum=${orderNum}`;
+    
+    return req.app.settings.db.query(updateOrdersQuery);
+}
+
 const getOrders = async (req, res, next) => {
     const q = req.query;
     const pageSize = q.pageSize || 25;
@@ -167,11 +173,13 @@ const getOrdersByNumber = async (req, res, next) => {
         await req.app.settings.db.query(searchOrdersQuery),
         await req.app.settings.db.query(searchImagesQuery)
     ]).then(result => {
+        const base64Rejex = /^(?:[A-Z0-9+\/]{4})*(?:[A-Z0-9+\/]{2}==|[A-Z0-9+\/]{3}=|[A-Z0-9+\/]{4})$/i;
+        
         orders = result[0];
         images = result[1];
-
         let imageObj = {};
-        const mimeType = 'image/png';
+        let mimeType;
+        let ext;
 
         images.recordset.forEach(item => {
             imageObj[item.StairNum] = item;
@@ -179,9 +187,44 @@ const getOrdersByNumber = async (req, res, next) => {
 
         orders.recordset.forEach(item => {
             if (imageObj[item.StairNum]) {
-                const b64 = Buffer.from(imageObj[item.StairNum].imagedata).toString('base64');
+                let b64;
+                let isBase64Valid;
+
+                ext = 'png';
+
+                if (imageObj[item.StairNum].OriginalFilename) {
+                    const originalExt = imageObj[item.StairNum].OriginalFilename.split('.');
+                    console.log('--DEBUG-- originalExt: ', originalExt);
+
+                    ext = originalExt.length > 1 ? originalExt[1] : ext;
+                }
+
+                console.log('--DEBUG-- ext: ', ext);
+                mimeType = `image/${ext}`;
+
+                // console.log('--DEBUG-- image obj: ', imageObj[item.StairNum].imagedata);
+                b64 = Buffer.from(imageObj[item.StairNum].imagedata).toString();
+
+                isBase64Valid = base64Rejex.test(b64);
+                
+                item.ImageBuffer = imageObj[item.StairNum].imagedata;
+
+                if (isBase64Valid) {
+                    // console.log('--DEBUG-- It is base64');
+                    item.Image = `data:${mimeType};base64,${b64}`;
+                } else {
+                    // console.log('--DEBUG-- It is not in base64');
+                    b64 = Buffer.from(imageObj[item.StairNum].imagedata).toString('base64');
+                
+                    isBase64Valid = base64Rejex.test(b64);
+
+                    if (isBase64Valid) {
+                        item.Image = `data:${mimeType};base64,${b64}`;
+                    }
+                }
+
                 // item.Image = imageObj[item.StairNum];
-                item.Image = `data:${mimeType};base64,${b64}`;
+                //item.Image = `data:${mimeType};base64,${b64}`;
             } else {
                 item.Image = null;
             }
@@ -205,17 +248,56 @@ const getOrdersByNumber = async (req, res, next) => {
 const createOrder = async (req, res, next) => {
     const body = req.body;
 
-    const customer = body.customer;
-    const quote = body.quote;
-    const deliveryAddress = body.deliveryAddress;
-    const billingAddress = body.billingAddress;
-    const orderDate = excelDateConvertor.dateInDays(new Date());
-    const deliveryDate = excelDateConvertor.dateInDays(new Date(body.deliveryDate));
-    const model = Number(body.model);
-    const jobNum = Number(body.jobNum);
-    const po = Number(body.po);
-    const numOfStairs = Number(body.numOfStairs);
-    const input = body.input;
+    let orderNum = body.orderNum;
+    let id = body.id;
+    const newStair = !!orderNum;
+
+    let customer;
+    let quote;
+    let deliveryAddress;
+    let billingAddress;
+    let orderDate;
+    let deliveryDate;
+    let model;
+    let jobNum;
+    let po;
+    let numOfStairs;
+    let input;
+    
+    let numberOfOrders = numOfStairs;
+
+    if (newStair) {
+        const order = await req.app.settings.db.query(`SELECT InputBy, StairsNum, PONum, JobNum, Model, OrderDate, Customer, Address, BillingAddress, DeliveryDate, Quote FROM Workorders WHERE ID=${id}`);
+
+        customer = order?.recordset[0].Customer;
+        quote = order?.recordset[0].Quote;
+        deliveryDate = order?.recordset[0].DeliveryDate;
+        billingAddress = order?.recordset[0].BillingAddress;
+        orderDate = order?.recordset[0].OrderDate;
+        deliveryAddress = order?.recordset[0].Address;
+        model = order?.recordset[0].Model;
+        jobNum = order?.recordset[0].JobNum || "''";
+        po = order?.recordset[0].PONum || "''";
+        numOfStairs = order?.recordset[0].StairsNum;
+        input = order?.recordset[0].InputBy;
+
+        numberOfOrders = 1;
+
+        console.log('--DEBUG-- order: ', order.recordset[0]);
+    } else {
+        customer = body.customer;
+        quote = body.quote;
+        deliveryAddress = body.deliveryAddress;
+        billingAddress = body.billingAddress;
+        orderDate = excelDateConvertor.dateInDays(new Date());
+        deliveryDate = excelDateConvertor.dateInDays(new Date(body.deliveryDate));
+        model = Number(body.model);
+        jobNum = Number(body.jobNum);
+        po = Number(body.po);
+        numOfStairs = Number(body.numOfStairs);
+        input = body.input;
+    }
+
     let createUncomplete;
     let createOrdersQuery;
     let createOrdersExtensionQuery;
@@ -228,15 +310,19 @@ const createOrder = async (req, res, next) => {
 
     const lastOrderNumberData = await req.app.settings.db.query(takeLastOrderQuery);
 
-    console.log('--DEBUG-- last order number: ', lastOrderNumberData.recordset);
+    console.log('--DEBUG-- lastOrderNumberData.recordset[0].ID ', lastOrderNumberData.recordset[0].ID);
 
-    let id = lastOrderNumberData.recordset[0].ID;
-    let orderNum = lastOrderNumberData.recordset[0].OrderNum;
+
+    id = lastOrderNumberData.recordset[0].ID;
     
-    orderNum++;
+    if (!newStair) {
+        orderNum = lastOrderNumberData.recordset[0].OrderNum;
+    
+        orderNum++;
+    }
 
     try {
-        for (let i of Array(numOfStairs)) {
+        for (let i of Array(numberOfOrders)) {
             id++;
         
             createUncomplete = getQueries({
@@ -244,7 +330,7 @@ const createOrder = async (req, res, next) => {
                 orderNum,
                 deliveryDate,
             }, 'createUncomplete');
-        
+
             createOrdersQuery = getQueries({
                 id,
                 customer,
@@ -260,7 +346,8 @@ const createOrder = async (req, res, next) => {
                 numOfStairs,
                 input,
             }, 'createOrder');
-            
+            console.log('--DEBUG-- createOrdersQuery: ', createOrdersQuery);
+
             createOrdersExtensionQuery = getQueries({
                 id,
                 orderNum,
@@ -272,6 +359,10 @@ const createOrder = async (req, res, next) => {
                 req.app.settings.db.query(createOrdersExtensionQuery),
             ]);
             console.log(`--DEBUG-- order with id: ${id} were created`);
+        }
+
+        if (newStair) {
+            await updateStairsCount(req, numOfStairs + 1, orderNum);
         }
     } catch (err) {
         return res.status(400).send({
@@ -290,18 +381,19 @@ const deleteOrder = async (req, res, next) => {
     const params = req.params;
 
     const orderNumber = params.orderNumber;
+    console.log(`--DEBUG-- order with number: ${orderNumber} will be deleted`);
 
     try {
-        deleteUncomplete = `DELETE FROM Uncomplete WHERE WONUM ${orderNumber}`;
-        deleteOrderExtensionsQuery = `DELETE FROM WorkOrderExtensions WHERE WONum ${orderNumber}`;
-        deleteOrdersQuery = `DELETE FROM Workorders WHERE WONUM ${orderNumber}`;
+        deleteUncomplete = `DELETE FROM stairs_server.dbo.Uncomplete WHERE WONUM=${orderNumber}`;
+        deleteOrderExtensionsQuery = `DELETE FROM WorkOrderExtensions WHERE WONum=${orderNumber}`;
+        deleteOrdersQuery = `DELETE FROM Workorders WHERE WONUM=${orderNumber}`;
     
         await Promise.all([
+            await req.app.settings.db.query(deleteUncomplete),
             req.app.settings.db.query(deleteOrdersQuery),
-            req.app.settings.db.query(deleteUncomplete),
             req.app.settings.db.query(deleteOrderExtensionsQuery),
         ]);
-        console.log(`--DEBUG-- orders with order number: ${orderNumber} were deleted`);
+        console.log(`--DEBUG-- orders with number: ${orderNumber} were deleted`);
     } catch (err) {
         return res.status(400).send({
             status: 'error',
@@ -317,20 +409,33 @@ const deleteOrder = async (req, res, next) => {
 
 const deleteStair = async (req, res, next) => {
     const params = req.params;
+    const q = req.query;
+    const orderNum = q.orderNumber;
+    const stairsCount = q.stairsCount
+    let deleteUncomplete;
+    let deleteOrderExtensionsQuery;
+    let deleteOrdersQuery;
 
     const stairNumber = params.stairNumber;
+    console.log(`--DEBUG-- stair with number: ${stairNumber} of ${orderNum} order will be deleted, stairs count ${stairsCount}`);
 
     try {
-        deleteUncomplete = `DELETE FROM Uncomplete WHERE WOID ${stairNumber}`;
-        deleteOrderExtensionsQuery = `DELETE FROM WorkOrderExtensions WHERE WOID ${stairNumber}`;
-        deleteOrdersQuery = `DELETE FROM Workorders WHERE ID ${stairNumber}`;
+        deleteUncomplete = `DELETE FROM stairs_server.dbo.Uncomplete WHERE WOID=${stairNumber}`;
+        deleteOrderExtensionsQuery = `DELETE FROM WorkOrderExtensions WHERE WOID=${stairNumber}`;
+        deleteOrdersQuery = `DELETE FROM Workorders WHERE ID=${stairNumber}`;
     
         await Promise.all([
             req.app.settings.db.query(deleteOrdersQuery),
             req.app.settings.db.query(deleteUncomplete),
             req.app.settings.db.query(deleteOrderExtensionsQuery),
         ]);
-        console.log(`--DEBUG-- stair with order number: ${stairNumber} was deleted`);
+
+        if (Number(stairsCount) > 1) {
+            const numberForUpdate = Number(stairsCount) - 1;
+
+            await updateStairsCount(req, numberForUpdate, orderNum);
+        }
+        console.log(`--DEBUG-- stair with number: ${stairNumber} was deleted`);
     } catch (err) {
         return res.status(400).send({
             status: 'error',
@@ -344,10 +449,336 @@ const deleteStair = async (req, res, next) => {
     });
 }
 
+const updateStair = async (req, res, next) => {
+    const params = req.params;
+    const body = req.body;
+    const id = params.id;
+    const type = body.sectionType; //Winder (CustomWindersType) / Landing (Landing_Wrap_OSM)
+    let updateOrdersExtensionQuery;
+    let updateOrdersQuery;
+    let queryName;
+
+    //common
+    let location;
+    let numberOfRises;
+    let stairStyle;
+    let riserType;
+    let connectedToOthers;
+    let totalHeight;
+    let numberStaircasesInHeight;
+    let numberWindersAndLanding;
+    let connectedTo;
+    let workorderComments;
+    let cutlistComments;
+    let billingComments;
+    let invoiceComments;
+
+    //winder
+    let winderRise;
+    let winderPickup;
+    let winderOn1;
+    let winderOn3;
+    let winderWrap;
+    let winderCutCorner;
+    let winderSeat;
+    let winderSeatLength;
+
+    //stair
+    let lngth;
+    let height;
+    let width;
+    let run; // not editable
+    let rise; // not editable
+    let method;
+    let notch;
+    let headroomMatters;
+    let offTheTop;
+    let noNosing;
+    let thirdAndFurred;
+    let materials;
+    let stringerStyle1;
+    let stringerStyle2;
+    let divisor;
+    
+    //landing
+    let landingPickup;
+    let landingWrapPlusOneNosing;
+    let landingSeat;
+    let landingOsmOnPickup;
+    let landingOsmOnWrap;
+    let landingSitsOnFloor;
+
+    if (type === 'Stair') {
+        //Workorders Table DB
+        location = body.location;
+        numberOfRises = body.numberOfRises;
+        stairStyle = Number(body.stairStyle);
+        stairType = Number(body.stairType);
+        riserType = Number(body.riserType);
+        lngth = body.lngth;
+        height = body.height;
+        width = body.width;
+        method = body.method;
+        notch = body.notch ? 1 : 0;
+        headroomMatters = body.headroomMatters ? 1 : 0;;
+        noNosing = body.noNosing ? 1 : 0;
+        thirdAndFurred = body.thirdAndFurred ? 1 : 0;
+        materials = body.materials;
+        stringerStyle1 = body.stringerStyle1;
+        stringerStyle2 = body.stringerStyle2;
+        divisor = body.divisor;
+
+        //WorkOrderExtensions
+        offTheTop = body.offTheTop ? 1 : 0;
+
+        queryName = 'updateStairOrder';
+
+        updateOrdersExtensionQuery = `
+            UPDATE
+                stairs.dbo.WorkOrderExtensions
+            SET
+                OffTheTop=${offTheTop}
+            WHERE
+                WOID=${id}
+        `;
+    }
+
+    if (type === 'Winder') {
+        //Workorders Table DB
+        location = body.location || body.winderLocation;
+        numberOfRises = body.numberOfRises;
+        stairStyle = Number(body.stairStyle) // Style
+        riserType = Number(body.riserType); // RiserType
+
+        winderRise = body.winderRise;
+        winderWrap = body.winderWrap;
+        winderPickup = body.winderPickup;
+        winderOn1 = body.winderOn1;
+        winderOn3 = body.winderOn3;
+        winderSeat = body.winderSeat ? 1 : 0;
+        winderSeatLength = body.winderSeatLength;
+        winderCutCorner = body.winderCutCorner;
+
+        queryName = 'updateWinderOrder';
+    }
+
+    if (type === 'Landing') {
+        //Workorders Table DB
+        location = body.location;
+
+        landingType = body.landingType;
+        landingPickup = body.landingPickup;
+        landingWrapPlusOneNosing = body.landingWrapPlusOneNosing;
+        landingSeat = body.landingSeat;
+        landingOsmOnPickup = body.landingOsmOnPickup;
+        landingSitsOnFloor = body.landingSitsOnFloor ? 1 : 0;
+
+        queryName = 'updateLandingOrder';
+    }
+
+    //Workorders, 'connection section'
+    connectedToOthers = body.connectedToOthers ? 1 : 0; // Connected
+    totalHeight = body.totalHeight;
+    numberStaircasesInHeight = body.countStairsInHeight;
+    numberWindersAndLanding = body.countWindersAndLandings ? 1 : 0;
+    connectedTo = body.connectedTo;
+
+    //Workorders, 'comments section'
+    workorderComments = body.workorderComments;
+    cutlistComments = body.cutlistComments;
+    billingComments = body.billingComments;
+    invoiceComments = body.invoiceComments;
+
+    switch (queryName) {
+        case 'updateStairOrder': {
+            updateOrdersQuery = getQueries({
+                id,
+                location,
+                numberOfRises,
+                stairStyle,
+                stairType,
+                riserType,
+                lngth,
+                height,
+                width,
+                method,
+                notch,
+                headroomMatters,
+                noNosing,
+                thirdAndFurred,
+                materials,
+                stringerStyle1,
+                stringerStyle2,
+                divisor,
+
+                connectedToOthers,
+                totalHeight,
+                numStrcasesInHeight: numberStaircasesInHeight,
+                numberWindersAndLanding: numberWindersAndLanding,
+                connectedTo,
+
+                cutlistComments,
+                workorderComments,
+                billingComments,
+                invoiceComments
+            }, queryName);
+        }
+
+        case 'updateWinderOrder': {
+            updateOrdersQuery = getQueries({
+                id,
+                location,
+                numberOfRises,
+                stairStyle,
+                riserType,
+                winderRise,
+                winderWrap,
+                winderPickup,
+                winderOn1,
+                winderOn3,
+                winderSeat,
+                winderSeatLength,
+                winderCutCorner,
+    
+                connectedToOthers,
+                totalHeight,
+                numStrcasesInHeight: numberStaircasesInHeight,
+                numberWindersAndLanding: numberWindersAndLanding,
+                connectedTo,
+    
+                cutlistComments,
+                workorderComments,
+                billingComments,
+                invoiceComments
+            }, queryName);
+        }
+
+        case 'updateLandingOrder': {
+            updateOrdersQuery = getQueries({
+                id,
+                location,
+                landingPickup,
+                landingWrapPlusOneNosing,
+                landingSeat,
+                landingOsmOnPickup,
+                landingOsmOnWrap,
+                landingSitsOnFloor,
+    
+                connectedToOthers,
+                totalHeight,
+                numStrcasesInHeight: numberStaircasesInHeight,
+                numberWindersAndLanding: numberWindersAndLanding,
+                connectedTo,
+    
+                cutlistComments,
+                workorderComments,
+                billingComments,
+                invoiceComments
+            }, queryName);
+        }
+    }    
+
+    console.log('--DEBUG-- workorders update', updateOrdersQuery);
+
+    try {
+        if (updateOrdersExtensionQuery) {
+            await Promise.all([
+                req.app.settings.db.query(updateOrdersQuery),
+                req.app.settings.db.query(updateOrdersExtensionQuery),
+            ]);
+        }
+        
+        await req.app.settings.db.query(updateOrdersQuery);
+    } catch (err) {
+        return res.status(400).send({
+            status: 'error',
+            message: err.message,
+            error: 'Error happened during \'Updating stair\' DB operation',
+        });
+    }
+
+    res.status(200).send({
+        status: 'success'
+    });
+}
+
+const uploadImage = async (req, res, next) => {
+    const body = req.body;
+    const params = req.params;
+
+    const imagedata = body.imagedata.split(',')[1];
+    const imagetext = body.imagetext.split('.')[0];
+    const originalfilename = body.imagetext;
+    const workorderID = params.id;
+    const orderNum = body.orderNum;
+    const description = body.description;
+    const removeImageQuery = `DELETE FROM stairs.dbo.stairimages WHERE workorderID=${workorderID}`;
+    const createImageQuery = `
+        INSERT INTO stairs.dbo.stairimages (
+            ImageText,
+            Originalfilename,
+            workorderID,
+            imagedata,
+            OrderNum,
+            Shipping,
+            ShowLarge,
+            Description
+        ) VALUES (
+            '${imagetext}',
+            '${originalfilename}',
+            '${workorderID}',
+            CONVERT(VARBINARY(MAX), '${imagedata}'),
+            '${orderNum}',
+            0,
+            0,
+            '${description}'
+        )`;
+
+        console.log('--DEBUG-- createImageQuery: ', createImageQuery);
+
+        try {
+            await req.app.settings.db.query(removeImageQuery),
+            await req.app.settings.db.query(createImageQuery)
+        } catch (err) {
+            return res.status(400).send({
+                status: 'error',
+                message: err.message,
+                error: 'Error happened during \'Creating image\' DB operation',
+            });
+        }
+
+        return res.status(200).send({
+            status: 'ok'
+        });
+}
+
+const removeImage = async (req, res, next) => {
+    const params = req.params;
+    const id = params.id;
+    const removeImageQuery = `DELETE FROM stairs.dbo.stairimages WHERE workorderID=${id}`;
+
+    try {
+        await req.app.settings.db.query(removeImageQuery);
+    } catch (err) {
+        return res.status(400).send({
+            status: 'error',
+            message: err.message,
+            error: 'Error happened during \'Removing image\' DB operation',
+        });
+    }
+
+    return res.status(200).send({
+        status: 'ok'
+    });
+};
+
 module.exports = {
     getOrders,
     createOrder,
     getOrdersByNumber,
     deleteOrder,
-    deleteStair, 
+    deleteStair,
+    updateStair,
+    uploadImage,
+    removeImage,
 }

@@ -55,8 +55,7 @@ const getQuery = (args, queryName) => {
             '',
             0,
             0
-        )
-        `,
+        )`,
 
         'createOrdersExtension': `
         INSERT INTO stairs.dbo.WorkOrderExtensions (
@@ -95,7 +94,7 @@ const getQuery = (args, queryName) => {
             '',
             '',
             NULL
-         )`,
+        )`,
 
         'createOrder': `INSERT INTO stairs.dbo.Workorders (
             ID,
@@ -200,7 +199,7 @@ const getQuery = (args, queryName) => {
             '${args.deliveryAddress}',
             ${args.model},
             ${args.po},
-            ${args.jobNum},
+            '${args.jobNum}',
             ${args.numOfStairs},
             ${args.orderDate},
             ${args.deliveryDate},
@@ -286,8 +285,86 @@ const getQuery = (args, queryName) => {
             ${args.quote ? 1 : 0},
             0,
             0
-        )
-    `
+        )`,
+
+        'updateStairOrder': `UPDATE 
+                            Workorders
+                        SET Location='${args.location}',
+                            NumRisers=${args.numberOfRises},
+                            Style=${args.stairStyle},
+                            StairType=${args.stairType},
+                            RiserType=${args.riserType},
+                            Length=${args.lngth},
+                            Height=${args.height},
+                            Width=${args.width},
+                            Method='${args.method}',
+                            Notch=${args.notch},
+                            HeadroomMatters=${args.headroomMatters},
+                            NoNosing=${args.noNosing},
+                            Furred=${args.thirdAndFurred},
+                            Materials='${args.materials}',
+                            StringerStyle1=${args.stringerStyle1},
+                            StringerStyle2=${args.stringerStyle2},
+                            Divisor=${args.divisor},
+                            Connected=${args.connectedToOthers},
+                            TotalHeight=${args.totalHeight},
+                            NumStrcasesInHeight=${args.numStrcasesInHeight},
+                            WindersAndLandings=${args.numberWindersAndLanding},
+                            ConnectedTo='${args.connectedTo}',
+                            CutlistComments='${args.cutlistComments}',
+                            WorkorderComments='${args.workorderComments}',
+                            BillingComments='${args.billingComments}',
+                            InvoiceComments='${args.invoiceComments}'
+                        WHERE ID=${args.id}`,
+        'updateWinderOrder': `UPDATE 
+                            Workorders
+                        SET Location='${args.location}',
+                            NumRisers=${args.numberOfRises},
+                            Style=${args.stairStyle},
+                            RiserType=${args.riserType},
+                            
+                            Connected=${args.connectedToOthers},
+                            TotalHeight=${args.totalHeight},
+                            NumStrcasesInHeight=${args.numStrcasesInHeight},
+                            WindersAndLandings=${args.numberWindersAndLanding},
+                            ConnectedTo='${args.connectedTo}',
+
+                            CutlistComments='${args.cutlistComments}',
+                            WorkorderComments='${args.workorderComments}',
+                            BillingComments='${args.billingComments}',
+                            InvoiceComments='${args.invoiceComments}',
+
+                            WinderRise=${args.winderRise},
+                            WinderWrap=${args.winderWrap},
+                            WinderPickup=${args.winderPickup},
+                            WinderOn1=${args.winderOn1},
+                            WinderOn3=${args.winderOn3},
+                            WinderSeat=${args.winderSeat},
+                            WinderLocation='${args.location}',
+                            WinderCutCorner=${args.winderCutCorner}
+                        WHERE ID=${args.id}`,
+        'updateLandingOrder': `UPDATE 
+            Workorders
+        SET Location='${args.location}',
+            
+            Connected=${args.connectedToOthers},
+            TotalHeight=${args.totalHeight},
+            NumStrcasesInHeight=${args.numStrcasesInHeight},
+            WindersAndLandings=${args.numberWindersAndLanding},
+            ConnectedTo='${args.connectedTo}',
+
+            CutlistComments='${args.cutlistComments}',
+            WorkorderComments='${args.workorderComments}',
+            BillingComments='${args.billingComments}',
+            InvoiceComments='${args.invoiceComments}',
+
+            Landing_PU='${args.landingPickup}',
+            Landing_Wrap='${args.landingWrapPlusOneNosing}',
+            Landing_Seat='${args.landingSeat}',
+            Landing_PU_OSM=${args.landingOsmOnPickup},
+            Landing_Wrap_OSM=${args.landingOsmOnWrap},
+            Landing_On_Floor=${args.landingSitsOnFloor}
+        WHERE ID=${args.id}`
     };
 
     return queries[queryName];
