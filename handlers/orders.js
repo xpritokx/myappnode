@@ -1,6 +1,25 @@
 const excelDateConvertor = require('../helpers/excel-date-convertor');
 const getQueries = require('../queries');
 
+const base64Rejex = /^(?:[A-Z0-9+\/]{4})*(?:[A-Z0-9+\/]{2}==|[A-Z0-9+\/]{3}=|[A-Z0-9+\/]{4})$/i;
+
+const customFlairsTypeObj = {
+    SACR: 1,
+    DACR: 2,
+    STF45: 3,
+    SAF45: 4,
+    STD30: 5,
+    SAF30: 6
+};
+
+const customBullnoseTypeObj = {
+    BULL90: 1,
+    BULL180: 2,
+    CBULL90: 3,
+    CBULL180: 4,
+    CBULLC: 5
+};
+
 const updateStairsCount = (req, numberForUpdate, orderNum) => {
     const updateOrdersQuery = `UPDATE Workorders SET StairsNum=${numberForUpdate} WHERE OrderNum=${orderNum}`;
     
@@ -112,6 +131,7 @@ const getOrders = async (req, res, next) => {
             OrdersTableView.PublicComment,
             OrdersTableView.Model,
             OrdersTableView.Customer,
+            OrdersTableView.CustomerID,
             OrdersTableView.WorkorderComments,
             OrdersTableView.CustomDelivery
         FROM OrdersTableView
@@ -136,7 +156,7 @@ const getOrders = async (req, res, next) => {
             'DeliveryDate',
         ]);
 
-        data.map(item => {
+        data = data.map(item => {
             if (item.ShipDate) item.ShipDate = new Date(item.ShipDate).toDateString();
             return item;
         });
@@ -172,61 +192,58 @@ const getOrdersByNumber = async (req, res, next) => {
     Promise.all([
         await req.app.settings.db.query(searchOrdersQuery),
         await req.app.settings.db.query(searchImagesQuery)
-    ]).then(result => {
-        const base64Rejex = /^(?:[A-Z0-9+\/]{4})*(?:[A-Z0-9+\/]{2}==|[A-Z0-9+\/]{3}=|[A-Z0-9+\/]{4})$/i;
-        
+    ]).then(result => {        
         orders = result[0];
         images = result[1];
-        let imageObj = {};
+
         let mimeType;
         let ext;
 
-        images.recordset.forEach(item => {
-            imageObj[item.StairNum] = item;
-        });
-
-        orders.recordset.forEach(item => {
-            if (imageObj[item.StairNum]) {
+        orders.recordset.forEach(order => {
+            let orderImages = images.recordset.filter((image) => {
+                return image.ID === order.ID;
+            });
+            
+            if (orderImages?.length) {
                 let b64;
                 let isBase64Valid;
 
-                ext = 'png';
+                if (!order.Images) order.Images = [];
 
-                if (imageObj[item.StairNum].OriginalFilename) {
-                    const originalExt = imageObj[item.StairNum].OriginalFilename.split('.');
-                    console.log('--DEBUG-- originalExt: ', originalExt);
+                orderImages.forEach((image) => {
+                    ext = 'png';
 
-                    ext = originalExt.length > 1 ? originalExt[1] : ext;
-                }
-
-                console.log('--DEBUG-- ext: ', ext);
-                mimeType = `image/${ext}`;
-
-                // console.log('--DEBUG-- image obj: ', imageObj[item.StairNum].imagedata);
-                b64 = Buffer.from(imageObj[item.StairNum].imagedata).toString();
-
-                isBase64Valid = base64Rejex.test(b64);
-                
-                item.ImageBuffer = imageObj[item.StairNum].imagedata;
-
-                if (isBase64Valid) {
-                    // console.log('--DEBUG-- It is base64');
-                    item.Image = `data:${mimeType};base64,${b64}`;
-                } else {
-                    // console.log('--DEBUG-- It is not in base64');
-                    b64 = Buffer.from(imageObj[item.StairNum].imagedata).toString('base64');
-                
+                    if (image.OriginalFilename) {
+                        const originalExt = image.OriginalFilename.split('.');
+    
+                        ext = originalExt.length > 1 ? originalExt[1] : ext;
+                    }
+    
+                    mimeType = `image/${ext}`;
+                    b64 = Buffer.from(image.imagedata).toString();
                     isBase64Valid = base64Rejex.test(b64);
+                    
+                    let resultImage = null;
 
                     if (isBase64Valid) {
-                        item.Image = `data:${mimeType};base64,${b64}`;
+                        resultImage = `data:${mimeType};base64,${b64}`;
+                    } else {
+                        b64 = Buffer.from(image.imagedata).toString('base64');
+                        isBase64Valid = base64Rejex.test(b64);
+    
+                        if (isBase64Valid) {
+                            resultImage = `data:${mimeType};base64,${b64}`;
+                        }
                     }
-                }
 
-                // item.Image = imageObj[item.StairNum];
-                //item.Image = `data:${mimeType};base64,${b64}`;
+                    if (resultImage) order.Images.push({
+                        id: image.PicID,
+                        type: image.PicType,
+                        img: resultImage
+                    });
+                });
             } else {
-                item.Image = null;
+                order.Images = [];
             }
         });
 
@@ -244,6 +261,69 @@ const getOrdersByNumber = async (req, res, next) => {
         });
     });
 };
+
+const getSalesOrdersByNumber = async (req, res, next) => {
+    const params = req.params;
+    const id = params.orderNumber;
+
+    const searchOrdersQuery = `SELECT * 
+                        FROM PricingView
+                        WHERE PricingView.OrderNum = ${id}
+    `;
+
+    const salesOrders = await req.app.settings.db.query(searchOrdersQuery);
+
+    return res.status(200).send({
+        status: 'ok',
+        total: salesOrders.recordset?.length || 0,
+        data: salesOrders.recordset || []
+    });
+};
+
+const getDefaultImages = async (req, res, next) => {
+    const getDefaultImagesQuery = `
+        SELECT ID, ImageText, imagedata
+        FROM stairimages
+        WHERE workorderID IS NULL
+    `;
+
+    const defaultImages = await req.app.settings.db.query(getDefaultImagesQuery);
+    let defaultImagesData = defaultImages.recordset;
+
+    defaultImagesData = defaultImagesData.map(img => {
+        let b64;
+        let isBase64Valid;
+        let mimeType;
+
+        let ext = 'png';
+
+        mimeType = `image/${ext}`;
+        b64 = Buffer.from(img.imagedata).toString();
+        isBase64Valid = base64Rejex.test(b64);
+        
+        let resultImage = null;
+
+        if (isBase64Valid) {
+            resultImage = `data:${mimeType};base64,${b64}`;
+        } else {
+            b64 = Buffer.from(img.imagedata).toString('base64');
+            isBase64Valid = base64Rejex.test(b64);
+
+            if (isBase64Valid) {
+                resultImage = `data:${mimeType};base64,${b64}`;
+            }
+        }
+
+        img.Image = resultImage;
+
+        return img;
+    });
+
+    return res.status(200).send({
+        total: defaultImagesData.length,
+        data: defaultImagesData,
+    });
+}
 
 const createOrder = async (req, res, next) => {
     const body = req.body;
@@ -264,7 +344,7 @@ const createOrder = async (req, res, next) => {
     let numOfStairs;
     let input;
     
-    let numberOfOrders = numOfStairs;
+    let numberOfOrders;
 
     if (newStair) {
         const order = await req.app.settings.db.query(`SELECT InputBy, StairsNum, PONum, JobNum, Model, OrderDate, Customer, Address, BillingAddress, DeliveryDate, Quote FROM Workorders WHERE ID=${id}`);
@@ -296,6 +376,8 @@ const createOrder = async (req, res, next) => {
         po = Number(body.po);
         numOfStairs = Number(body.numOfStairs);
         input = body.input;
+
+        numberOfOrders = numOfStairs;
     }
 
     let createUncomplete;
@@ -311,7 +393,6 @@ const createOrder = async (req, res, next) => {
     const lastOrderNumberData = await req.app.settings.db.query(takeLastOrderQuery);
 
     console.log('--DEBUG-- lastOrderNumberData.recordset[0].ID ', lastOrderNumberData.recordset[0].ID);
-
 
     id = lastOrderNumberData.recordset[0].ID;
     
@@ -363,6 +444,20 @@ const createOrder = async (req, res, next) => {
 
         if (newStair) {
             await updateStairsCount(req, numOfStairs + 1, orderNum);
+        } else {
+            const updateModelQuery = `
+                UPDATE
+                    stairs.dbo.Models
+                SET
+                    Workorder='${orderNum}',
+                    Customer='${customer}'
+                WHERE
+                    ID=${model}
+            `;
+
+            console.log('--DEBUG-- update Model Query: ', updateModelQuery);
+
+            await req.app.settings.db.query(updateModelQuery);
         }
     } catch (err) {
         return res.status(400).send({
@@ -461,6 +556,7 @@ const updateStair = async (req, res, next) => {
     //common
     let location;
     let numberOfRises;
+    let numberOfTreads;
     let stairStyle;
     let riserType;
     let connectedToOthers;
@@ -472,6 +568,14 @@ const updateStair = async (req, res, next) => {
     let cutlistComments;
     let billingComments;
     let invoiceComments;
+    let blurbLeftFlair;
+    let blurbRightFlair;
+    let blurbLeftBullnose;
+    let blurbRightBullnose;
+    let customFlairsTypeRight;
+    let customBullnoseTypeRight;
+    let customFlairsType;
+    let customBullnoseType;
 
     //winder
     let winderRise;
@@ -487,6 +591,7 @@ const updateStair = async (req, res, next) => {
     let lngth;
     let height;
     let width;
+    let osm;
     let run; // not editable
     let rise; // not editable
     let method;
@@ -498,6 +603,11 @@ const updateStair = async (req, res, next) => {
     let materials;
     let stringerStyle1;
     let stringerStyle2;
+    let oneInchPly;
+    let halfInchPly;
+    let meas2X6;
+    let meas2X10;
+    let meas2X12;
     let divisor;
     
     //landing
@@ -512,6 +622,7 @@ const updateStair = async (req, res, next) => {
         //Workorders Table DB
         location = body.location;
         numberOfRises = body.numberOfRises;
+        numberOfTreads = body.numberOfTreads;
         stairStyle = Number(body.stairStyle);
         stairType = Number(body.stairType);
         riserType = Number(body.riserType);
@@ -527,6 +638,23 @@ const updateStair = async (req, res, next) => {
         stringerStyle1 = body.stringerStyle1;
         stringerStyle2 = body.stringerStyle2;
         divisor = body.divisor;
+        osm = body.osm;
+        oneInchPly = body.oneInchPly;
+        halfInchPly = body.halfInchPly;
+        meas2X6 = body.meas2X6;
+        meas2X10 = body.meas2X10;
+        meas2X12 = body.meas2X12;
+
+        blurbLeftFlair = body.blurb_left_flair;
+        blurbRightFlair = body.blurb_right_flair;
+        blurbLeftBullnose = body.blurb_left_bullnose;
+        blurbRightBullnose = body.blurb_right_bullnose;
+
+        customFlairsTypeRight = customFlairsTypeObj[blurbRightFlair];
+        customFlairsType = customFlairsTypeObj[blurbLeftFlair];
+
+        customBullnoseTypeRight = customBullnoseTypeObj[blurbRightBullnose];
+        customBullnoseType = customBullnoseTypeObj[blurbLeftBullnose];
 
         //WorkOrderExtensions
         offTheTop = body.offTheTop ? 1 : 0;
@@ -549,6 +677,7 @@ const updateStair = async (req, res, next) => {
         numberOfRises = body.numberOfRises;
         stairStyle = Number(body.stairStyle) // Style
         riserType = Number(body.riserType); // RiserType
+        osm = body.osm;
 
         winderRise = body.winderRise;
         winderWrap = body.winderWrap;
@@ -565,6 +694,7 @@ const updateStair = async (req, res, next) => {
     if (type === 'Landing') {
         //Workorders Table DB
         location = body.location;
+        osm = body.osm;
 
         landingType = body.landingType;
         landingPickup = body.landingPickup;
@@ -595,6 +725,7 @@ const updateStair = async (req, res, next) => {
                 id,
                 location,
                 numberOfRises,
+                numberOfTreads,
                 stairStyle,
                 stairType,
                 riserType,
@@ -610,6 +741,23 @@ const updateStair = async (req, res, next) => {
                 stringerStyle1,
                 stringerStyle2,
                 divisor,
+                osm,
+                oneInchPly,
+                halfInchPly,
+                meas2X6,
+                meas2X10,
+                meas2X12,
+
+                blurbLeftFlair,
+                blurbRightFlair,
+                blurbLeftBullnose,
+                blurbRightBullnose,
+
+                customFlairsTypeRight,
+                customBullnoseType,
+
+                customBullnoseTypeRight,
+                customBullnoseType,
 
                 connectedToOthers,
                 totalHeight,
@@ -622,6 +770,8 @@ const updateStair = async (req, res, next) => {
                 billingComments,
                 invoiceComments
             }, queryName);
+
+            break;
         }
 
         case 'updateWinderOrder': {
@@ -651,6 +801,8 @@ const updateStair = async (req, res, next) => {
                 billingComments,
                 invoiceComments
             }, queryName);
+
+            break;
         }
 
         case 'updateLandingOrder': {
@@ -675,6 +827,8 @@ const updateStair = async (req, res, next) => {
                 billingComments,
                 invoiceComments
             }, queryName);
+
+            break;
         }
     }    
 
@@ -686,9 +840,9 @@ const updateStair = async (req, res, next) => {
                 req.app.settings.db.query(updateOrdersQuery),
                 req.app.settings.db.query(updateOrdersExtensionQuery),
             ]);
+        } else {
+            await req.app.settings.db.query(updateOrdersQuery);
         }
-        
-        await req.app.settings.db.query(updateOrdersQuery);
     } catch (err) {
         return res.status(400).send({
             status: 'error',
@@ -712,7 +866,13 @@ const uploadImage = async (req, res, next) => {
     const workorderID = params.id;
     const orderNum = body.orderNum;
     const description = body.description;
-    const removeImageQuery = `DELETE FROM stairs.dbo.stairimages WHERE workorderID=${workorderID}`;
+
+    if (!imagedata) {
+        return res.status(400).send({
+            status: 'Image doesn\'t exists'
+        });
+    }
+
     const createImageQuery = `
         INSERT INTO stairs.dbo.stairimages (
             ImageText,
@@ -737,7 +897,6 @@ const uploadImage = async (req, res, next) => {
         console.log('--DEBUG-- createImageQuery: ', createImageQuery);
 
         try {
-            await req.app.settings.db.query(removeImageQuery),
             await req.app.settings.db.query(createImageQuery)
         } catch (err) {
             return res.status(400).send({
@@ -754,8 +913,11 @@ const uploadImage = async (req, res, next) => {
 
 const removeImage = async (req, res, next) => {
     const params = req.params;
+    const orderID = params.orderID;
     const id = params.id;
-    const removeImageQuery = `DELETE FROM stairs.dbo.stairimages WHERE workorderID=${id}`;
+    const removeImageQuery = `DELETE FROM stairs.dbo.stairimages WHERE workorderID=${orderID} AND ID=${id}`;
+
+    console.log('--DEBUG-- removeImage: ', removeImageQuery);
 
     try {
         await req.app.settings.db.query(removeImageQuery);
@@ -781,4 +943,6 @@ module.exports = {
     updateStair,
     uploadImage,
     removeImage,
+    getDefaultImages,
+    getSalesOrdersByNumber,
 }

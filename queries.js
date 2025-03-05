@@ -1,4 +1,6 @@
 const getQuery = (args, queryName) => {
+    console.log('--DEBUG-- updateStair ARGS!: ',  args);
+
     const queries = {
         'createUncomplete': `
         INSERT INTO stairs_server.dbo.Uncomplete (
@@ -230,7 +232,7 @@ const getQuery = (args, queryName) => {
             0,
             0,
             0,
-            'plywood tread, spruce stingers',
+            'plywood tread, spruce stringers',
             -1,
             -1,
             0,
@@ -299,6 +301,7 @@ const getQuery = (args, queryName) => {
                             Width=${args.width},
                             Method='${args.method}',
                             Notch=${args.notch},
+                            OSM=${args.osm},
                             HeadroomMatters=${args.headroomMatters},
                             NoNosing=${args.noNosing},
                             Furred=${args.thirdAndFurred},
@@ -310,11 +313,25 @@ const getQuery = (args, queryName) => {
                             TotalHeight=${args.totalHeight},
                             NumStrcasesInHeight=${args.numStrcasesInHeight},
                             WindersAndLandings=${args.numberWindersAndLanding},
+                            CustomNumCustomTreads=${args.numberOfTreads},
                             ConnectedTo='${args.connectedTo}',
                             CutlistComments='${args.cutlistComments}',
                             WorkorderComments='${args.workorderComments}',
                             BillingComments='${args.billingComments}',
-                            InvoiceComments='${args.invoiceComments}'
+                            InvoiceComments='${args.invoiceComments}',
+                            OneInchPly=${args.oneInchPly},
+                            HalfInchPly=${args.halfInchPly},
+                            meas2X6=${args.meas2X6},
+                            meas2X10=${args.meas2X10},
+                            meas2X12=${args.meas2X12},
+                            blurb_left_flair='${args.blurbLeftFlair}',
+                            blurb_right_flair='${args.blurbRightFlair}',
+                            blurb_left_bullnose='${args.blurbLeftBullnose}',
+                            blurb_right_bullnose='${args.blurbRightBullnose}',
+                            CustomFlairsType=${args.customFlairsType},
+                            CustomFlairsTypeRight=${args.customFlairsTypeRight},
+                            CustomBullnoseType=${args.customBullnoseType},
+                            CustomBullnoseTypeRight=${args.customBullnoseTypeRight}
                         WHERE ID=${args.id}`,
         'updateWinderOrder': `UPDATE 
                             Workorders
