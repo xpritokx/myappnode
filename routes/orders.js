@@ -14,6 +14,7 @@ router.post('/image/:id', authMiddleware, ordersHandler.uploadImage);
 router.delete('/image/:orderID/:id', authMiddleware, ordersHandler.removeImage);
 router.delete('/order/:orderNumber', authMiddleware, ordersHandler.deleteOrder);
 router.delete('/stair/:stairNumber', authMiddleware, ordersHandler.deleteStair);
+router.put('/status/:orderNumber', authMiddleware, ordersHandler.updateStatus);
 router.put('/stair/:id', authMiddleware, ordersHandler.updateStair);
 
 module.exports = router;

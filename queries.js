@@ -2,8 +2,8 @@ const getQuery = (args, queryName) => {
     console.log('--DEBUG-- updateStair ARGS!: ',  args);
 
     const queries = {
-        'createUncomplete': `
-        INSERT INTO stairs_server.dbo.Uncomplete (
+        'createComplete': `
+        INSERT INTO stairs_server.dbo.Complete (
             WOID,
             WONUM,
             Delivery,
@@ -328,10 +328,10 @@ const getQuery = (args, queryName) => {
                             blurb_right_flair='${args.blurbRightFlair}',
                             blurb_left_bullnose='${args.blurbLeftBullnose}',
                             blurb_right_bullnose='${args.blurbRightBullnose}',
-                            CustomFlairsType=${args.customFlairsType},
-                            CustomFlairsTypeRight=${args.customFlairsTypeRight},
-                            CustomBullnoseType=${args.customBullnoseType},
-                            CustomBullnoseTypeRight=${args.customBullnoseTypeRight}
+                            CustomFlairsType='${args.customFlairsType}',
+                            CustomFlairsTypeRight='${args.customFlairsTypeRight}',
+                            CustomBullnoseType='${args.customBullnoseType}',
+                            CustomBullnoseTypeRight='${args.customBullnoseTypeRight}'
                         WHERE ID=${args.id}`,
         'updateWinderOrder': `UPDATE 
                             Workorders

@@ -26,6 +26,23 @@ const updateStairsCount = (req, numberForUpdate, orderNum) => {
     return req.app.settings.db.query(updateOrdersQuery);
 }
 
+const firstDayOfNextMonth = (excelDate) => { 
+    const baseDate = new Date(1900, 0, 1); 
+    const msInADay = 86400000; // Milliseconds in one day 
+    
+    const daysSinceBaseDate = excelDate - 2; // Excel considers 1900 as a leap year, so subtract 2 
+    const date = new Date(baseDate.getTime() + daysSinceBaseDate * msInADay); 
+    
+    date.setDate(1); 
+    date.setMonth(date.getMonth() + 1); 
+    
+    const newExcelDate = (date - baseDate) / msInADay + 2; // Add 2 to account for Excel's leap year bug 
+    
+    const timePart = excelDate - Math.floor(excelDate); 
+    
+    return Math.floor(newExcelDate) + timePart; 
+}
+
 const getOrders = async (req, res, next) => {
     const q = req.query;
     const pageSize = q.pageSize || 25;
@@ -410,7 +427,7 @@ const createOrder = async (req, res, next) => {
                 id,
                 orderNum,
                 deliveryDate,
-            }, 'createUncomplete');
+            }, 'createComplete');
 
             createOrdersQuery = getQueries({
                 id,
@@ -568,10 +585,12 @@ const updateStair = async (req, res, next) => {
     let cutlistComments;
     let billingComments;
     let invoiceComments;
+
     let blurbLeftFlair;
     let blurbRightFlair;
     let blurbLeftBullnose;
     let blurbRightBullnose;
+
     let customFlairsTypeRight;
     let customBullnoseTypeRight;
     let customFlairsType;
@@ -650,11 +669,18 @@ const updateStair = async (req, res, next) => {
         blurbLeftBullnose = body.blurb_left_bullnose;
         blurbRightBullnose = body.blurb_right_bullnose;
 
-        customFlairsTypeRight = customFlairsTypeObj[blurbRightFlair];
-        customFlairsType = customFlairsTypeObj[blurbLeftFlair];
+        customFlairsTypeRight = blurbRightFlair ? customFlairsTypeObj[blurbRightFlair] : '';
+        customFlairsType = blurbLeftFlair ? customFlairsTypeObj[blurbLeftFlair] : '';
 
-        customBullnoseTypeRight = customBullnoseTypeObj[blurbRightBullnose];
-        customBullnoseType = customBullnoseTypeObj[blurbLeftBullnose];
+        customBullnoseTypeRight = blurbRightBullnose ? customBullnoseTypeObj[blurbRightBullnose] : '';
+        customBullnoseType = blurbLeftBullnose ? customBullnoseTypeObj[blurbLeftBullnose] : '';
+
+        console.log('--DEBUG-- flairs&bullnoses: ', {
+            customFlairsTypeRight,
+            customFlairsType,
+            customBullnoseTypeRight,
+            customBullnoseType
+        });
 
         //WorkOrderExtensions
         offTheTop = body.offTheTop ? 1 : 0;
@@ -754,7 +780,7 @@ const updateStair = async (req, res, next) => {
                 blurbRightBullnose,
 
                 customFlairsTypeRight,
-                customBullnoseType,
+                customFlairsType,
 
                 customBullnoseTypeRight,
                 customBullnoseType,
@@ -856,6 +882,93 @@ const updateStair = async (req, res, next) => {
     });
 }
 
+const updateStatus = async (req, res, next) => {
+    const params = req.params;
+    const body = req.body;
+    const orderNumber = params.orderNumber;
+    const status = body.status;
+    let updateQuery = '';
+    let deliveryDate = '';
+    
+    if (['Delivered', 'Picked Up'].includes(status)) {
+        const takeLastCompletedQuery = `
+            SELECT TOP 1 stairs_server.dbo.Complete.ID, stairs_server.dbo.Complete.Delivery
+            FROM stairs_server.dbo.Complete
+            WHERE WONUM=${orderNumber}
+            ORDER BY stairs_server.dbo.Complete.ID DESC
+        `;
+
+        const lastOrderNumberData = await req.app.settings.db.query(takeLastCompletedQuery);
+        console.log('--DEBUG-- lastOrderNumberData: ', lastOrderNumberData);
+
+        if (lastOrderNumberData.recordset && lastOrderNumberData.recordset.length) {
+            deliveryDate = lastOrderNumberData.recordset[0].Delivery;
+        }
+    }
+
+    switch (status) {
+        case 'Loaded': {
+            updateQuery = `UPDATE 
+                            stairs_server.dbo.Complete
+                        SET ShipFlag=1,
+                            ShipDate=0
+                        WHERE WONUM=${orderNumber}`
+            
+            break;
+        }
+
+        case 'Unloaded': {
+            updateQuery = `UPDATE 
+                            stairs_server.dbo.Complete
+                        SET ShipFlag=0,
+                            ShipDate=0
+                        WHERE WONUM=${orderNumber}`
+
+            break;
+        }
+
+        case 'Delivered': {
+            let shipDate = firstDayOfNextMonth(deliveryDate);
+
+            updateQuery = `UPDATE 
+                            stairs_server.dbo.Complete
+                        SET ShipFlag=2,
+                            ShipDate=${shipDate}
+                        WHERE WONUM=${orderNumber}`
+
+            break;
+        }
+
+        case 'Picked Up': {
+            let shipDate = firstDayOfNextMonth(deliveryDate);
+
+            updateQuery = `UPDATE 
+                            stairs_server.dbo.Complete
+                        SET ShipFlag=4,
+                            ShipDate=${shipDate}
+                        WHERE WONUM=${orderNumber}`
+
+            break;
+        }
+    }
+
+    try {
+        await req.app.settings.db.query(updateQuery);
+    } catch (err) {
+        return res.status(400).send({
+            status: 'error',
+            message: err.message,
+            error: 'Error happened during \'Updating order ship status\' DB operation',
+        });
+    }
+
+    console.log('--DEBUG-- update order ship status query: ', updateQuery);
+
+    return res.status(200).send({
+        status: 'ok'
+    });
+}
+
 const uploadImage = async (req, res, next) => {
     const body = req.body;
     const params = req.params;
@@ -941,6 +1054,7 @@ module.exports = {
     deleteOrder,
     deleteStair,
     updateStair,
+    updateStatus,
     uploadImage,
     removeImage,
     getDefaultImages,
