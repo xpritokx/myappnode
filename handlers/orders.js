@@ -256,6 +256,7 @@ const getOrdersByNumber = async (req, res, next) => {
                     if (resultImage) order.Images.push({
                         id: image.PicID,
                         type: image.PicType,
+                        text: image.PicText,
                         img: resultImage
                     });
                 });
@@ -401,20 +402,28 @@ const createOrder = async (req, res, next) => {
     let createOrdersQuery;
     let createOrdersExtensionQuery;
 
-    const takeLastOrderQuery = `
-        SELECT TOP 1 Workorders.ID, Workorders.OrderNum
+    const takeLastIdQuery = `
+        SELECT TOP 1 Workorders.ID
         FROM Workorders
         ORDER BY Workorders.ID DESC
     `;
 
-    const lastOrderNumberData = await req.app.settings.db.query(takeLastOrderQuery);
+    const lastOrderID = await req.app.settings.db.query(takeLastIdQuery);
 
-    console.log('--DEBUG-- lastOrderNumberData.recordset[0].ID ', lastOrderNumberData.recordset[0].ID);
-
-    id = lastOrderNumberData.recordset[0].ID;
+    id = lastOrderID.recordset[0].ID;
     
+    console.log('--DEBUG-- new id: ', id);
+
     if (!newStair) {
-        orderNum = lastOrderNumberData.recordset[0].OrderNum;
+        const takeLastOrderNumQuery = `
+            SELECT TOP 1 Workorders.OrderNum
+            FROM Workorders
+            ORDER BY Workorders.OrderNum DESC
+        `;
+
+        const lastOrderNum = await req.app.settings.db.query(takeLastOrderNumQuery);
+        
+        orderNum = lastOrderNum.recordset[0].OrderNum;
     
         orderNum++;
     }
@@ -422,12 +431,13 @@ const createOrder = async (req, res, next) => {
     try {
         for (let i of Array(numberOfOrders)) {
             id++;
-        
+
             createUncomplete = getQueries({
                 id,
                 orderNum,
                 deliveryDate,
-            }, 'createComplete');
+                location: ''
+            }, 'createUncomplete');
 
             createOrdersQuery = getQueries({
                 id,
@@ -491,17 +501,23 @@ const createOrder = async (req, res, next) => {
 
 const deleteOrder = async (req, res, next) => {
     const params = req.params;
-
     const orderNumber = params.orderNumber;
+    let deleteComplete;
+    let deleteUncomplete;
+    let deleteOrderExtensionsQuery;
+    let deleteOrdersQuery;
+
     console.log(`--DEBUG-- order with number: ${orderNumber} will be deleted`);
 
     try {
+        deleteComplete = `DELETE FROM stairs_server.dbo.Complete WHERE WONUM=${orderNumber}`;
         deleteUncomplete = `DELETE FROM stairs_server.dbo.Uncomplete WHERE WONUM=${orderNumber}`;
         deleteOrderExtensionsQuery = `DELETE FROM WorkOrderExtensions WHERE WONum=${orderNumber}`;
-        deleteOrdersQuery = `DELETE FROM Workorders WHERE WONUM=${orderNumber}`;
+        deleteOrdersQuery = `DELETE FROM Workorders WHERE OrderNum=${orderNumber}`;
     
         await Promise.all([
-            await req.app.settings.db.query(deleteUncomplete),
+            req.app.settings.db.query(deleteComplete),
+            req.app.settings.db.query(deleteUncomplete),
             req.app.settings.db.query(deleteOrdersQuery),
             req.app.settings.db.query(deleteOrderExtensionsQuery),
         ]);
@@ -605,6 +621,10 @@ const updateStair = async (req, res, next) => {
     let winderCutCorner;
     let winderSeat;
     let winderSeatLength;
+    let customWindersType;
+    let customWindersL;
+    let customWindersR;
+    let blurbWinder;
 
     //stair
     let lngth;
@@ -625,9 +645,18 @@ const updateStair = async (req, res, next) => {
     let oneInchPly;
     let halfInchPly;
     let meas2X6;
-    let meas2X10;
-    let meas2X12;
+    let meas2x10;
+    let meas2x12;
     let divisor;
+    let custGarage;
+    let custDeck;
+    let custStyle1Adj;
+    let custStyle2Adj;
+    let sill;
+    let opening;
+    let joist;
+    let headroomTotal;
+    let third;
     
     //landing
     let landingPickup;
@@ -636,6 +665,9 @@ const updateStair = async (req, res, next) => {
     let landingOsmOnPickup;
     let landingOsmOnWrap;
     let landingSitsOnFloor;
+    let customLandingL;
+    let squareLanding;
+    let blurbLanding;
 
     if (type === 'Stair') {
         //Workorders Table DB
@@ -661,8 +693,13 @@ const updateStair = async (req, res, next) => {
         oneInchPly = body.oneInchPly;
         halfInchPly = body.halfInchPly;
         meas2X6 = body.meas2X6;
-        meas2X10 = body.meas2X10;
-        meas2X12 = body.meas2X12;
+        meas2x10 = body.meas2X10;
+        meas2x12 = body.meas2X12;
+
+        joist = body.joist || 0;
+        sill = body.sill || 0;
+        opening = body.opening || 0;
+        third = body.third ? 1 : 0;
 
         blurbLeftFlair = body.blurb_left_flair;
         blurbRightFlair = body.blurb_right_flair;
@@ -714,6 +751,40 @@ const updateStair = async (req, res, next) => {
         winderSeatLength = body.winderSeatLength;
         winderCutCorner = body.winderCutCorner;
 
+        let winderTypeSide = body.winderType[body.winderType.length - 1];
+
+        if (winderTypeSide === 'L') {
+            customWindersL = 1;
+            customWindersR = 0;
+        
+        }
+        if (winderTypeSide === 'R') {
+            customWindersL = 0;
+            customWindersR = 1;
+        }
+        
+        if (body.winderType === 'WIND_L') customWindersType = 1;
+        if (body.winderType === 'WIND_R') customWindersType = 6;
+
+        if (body.winderType === 'WINDC_L') customWindersType = 2;
+        if (body.winderType === 'WINDC_R') customWindersType = 7;
+
+        if (body.winderType === 'WINDF_L') customWindersType = 3;
+        if (body.winderType === 'WINDF_R') customWindersType = 8;
+
+        if (body.winderType === 'WIND45_L') customWindersType = 4;
+        if (body.winderType === 'WIND45_R') customWindersType = 9;
+
+        if (body.winderType === 'WIND45C_L') customWindersType = 5;
+        if (body.winderType === 'WIND45C_R') customWindersType = 10;
+        
+        let side = body.winderType[body.winderType.length - 1];
+        let winderTread = side === 'L' ? '3 tr;' : '2 tr;';
+
+        blurbWinder = `${body.winderType}-${winderTread}${side}: ${Number(winderPickup)} PU. ${Number(winderWrap)} W; ${Number(winderOn1)} on 1. ${Number(winderOn3)} on 3; ${Number(winderRise)} rise;`;
+
+        if (winderSeat) blurbWinder += `${winderSeatLength}" seat;`;
+
         queryName = 'updateWinderOrder';
     }
 
@@ -723,11 +794,48 @@ const updateStair = async (req, res, next) => {
         osm = body.osm;
 
         landingType = body.landingType;
-        landingPickup = body.landingPickup;
-        landingWrapPlusOneNosing = body.landingWrapPlusOneNosing;
-        landingSeat = body.landingSeat;
-        landingOsmOnPickup = body.landingOsmOnPickup;
+        landingPickup = Number(body.landingPickup);
+        landingOsmOnWrap = Number(body.landingOsmOnWrap);
+        landingWrapPlusOneNosing = Number(body.landingWrapPlusOneNosing);
+        landingSeat = Number(body.landingSeat);
+        landingOsmOnPickup = Number(body.landingOsmOnPickup);
         landingSitsOnFloor = body.landingSitsOnFloor ? 1 : 0;
+        stringerStyle1 = -1;
+        let side = '';
+
+        if (landingType === 'LANDINGL') {
+            customLandingL = 1;
+            squareLanding = 0;
+        }
+
+        if (landingType === 'LANDINGR') {
+            customLandingL = 0;
+            squareLanding = 0;
+        }
+
+        if (landingType === 'SQR_LANDINGL') {
+            customLandingL = 1;
+            squareLanding = 1;
+        }
+
+        if (landingType === 'SQR_LANDINGR') {
+            customLandingL = 0;
+            squareLanding = 1;
+        }
+
+        if (landingType === 'LANDINGSTR') {
+            customLandingL = 0;
+            squareLanding = 0;
+            stringerStyle1 = 1212;
+
+            side = 'STRAIGHT';
+        }
+
+        if (landingType !== 'LANDINGSTR') {
+            side = customLandingL === 1 ? 'LEFT' : 'RIGHT';
+        }
+
+        blurbLanding = `${squareLanding === 1 ? '(SQUARE LANDING) ' : ''}${landingPickup?.toFixed(4)}" PU, ${landingSeat?.toFixed(4)}" seat, ${landingOsmOnPickup?.toFixed(4)}" PU OSM, ${landingWrapPlusOneNosing?.toFixed(4)}" Wrap, ${landingOsmOnWrap?.toFixed(4)}" Wrap OSM - ${side} `
 
         queryName = 'updateLandingOrder';
     }
@@ -771,8 +879,13 @@ const updateStair = async (req, res, next) => {
                 oneInchPly,
                 halfInchPly,
                 meas2X6,
-                meas2X10,
-                meas2X12,
+                meas2x10,
+                meas2x12,
+
+                joist,
+                sill,
+                opening,
+                third,
 
                 blurbLeftFlair,
                 blurbRightFlair,
@@ -815,7 +928,11 @@ const updateStair = async (req, res, next) => {
                 winderSeat,
                 winderSeatLength,
                 winderCutCorner,
-    
+                customWindersType,
+                customWindersL,
+                customWindersR,
+                blurbWinder,
+
                 connectedToOthers,
                 totalHeight,
                 numStrcasesInHeight: numberStaircasesInHeight,
@@ -841,6 +958,10 @@ const updateStair = async (req, res, next) => {
                 landingOsmOnPickup,
                 landingOsmOnWrap,
                 landingSitsOnFloor,
+                customLandingL,
+                squareLanding,
+                blurbLanding,
+                stringerStyle1,
     
                 connectedToOthers,
                 totalHeight,
@@ -1047,6 +1168,303 @@ const removeImage = async (req, res, next) => {
     });
 };
 
+const duplicate = async (req, res, next) => {
+    const body = req.body;
+    const params = req.params;
+    const orderNum = body.orderNum;
+    const action = params.action;
+
+    let workorders;
+    let workordersExtensions;
+    let uncomplete;
+    let complete
+
+
+    console.log('--DEBUG-- duplicate: ', orderNum);
+
+    const getWorkordersQuery = `
+        SELECT *
+        FROM Workorders
+        WHERE OrderNum=${orderNum}
+    `;
+
+    const getWorkorderExtensionsQuery = `
+        SELECT *
+        FROM WorkOrderExtensions
+        WHERE WONum=${orderNum}
+    `;
+
+    const getCompleteQuery = `
+        SELECT *
+        FROM stairs_server.dbo.Complete
+        WHERE WONUM=${orderNum}
+    `;
+
+    const getUncompleteQuery = `
+        SELECT *
+        FROM stairs_server.dbo.Uncomplete
+        WHERE WONUM=${orderNum}
+    `;
+    
+    let results = await Promise.all([
+        req.app.settings.db.query(getWorkordersQuery),
+        req.app.settings.db.query(getWorkorderExtensionsQuery),
+        req.app.settings.db.query(getCompleteQuery),
+        req.app.settings.db.query(getUncompleteQuery),
+    ]);
+
+    workorders = results[0] && results[0].recordset;
+    workordersExtensions = results[1] && results[1].recordset;
+    complete = results[2] && results[2].recordset;
+    uncomplete = results[3] && results[3].recordset;
+
+    if (action === 'duplicate') {
+        // TAKING INFORMATION TO CREATE NEW ID AND ORDER NUM
+
+        const takeLastIdQuery = `
+            SELECT TOP 1 Workorders.ID
+            FROM Workorders
+            ORDER BY Workorders.ID DESC
+        `;
+
+        const lastOrderID = await req.app.settings.db.query(takeLastIdQuery);
+
+        let id = lastOrderID.recordset[0].ID;
+        let newOrderNum;
+
+        console.log('--DEBUG-- new id: ', id);
+
+        const takeLastOrderNumQuery = `
+            SELECT TOP 1 Workorders.OrderNum
+            FROM Workorders
+            ORDER BY Workorders.OrderNum DESC
+        `;
+
+        const lastOrderNum = await req.app.settings.db.query(takeLastOrderNumQuery);
+        
+        newOrderNum = lastOrderNum.recordset[0].OrderNum;
+
+        console.log('--DEBUG-- highest order num: ', newOrderNum);
+        newOrderNum++;
+
+        //////////////////////////////////////////////////////////////////////////////
+
+        if (workorders && workorders.length) {
+            try {
+                for (let workorder of workorders) {
+                    id++;
+                    workorder['NewID'] = id;
+                    workorder['NewOrderNum'] = newOrderNum;
+                    workorder['TableName'] = 'Workorders';
+
+                    let workorderCreateQuery = getQueries(workorder, 'createFullWorkorder');
+        
+                    await req.app.settings.db.query(workorderCreateQuery);
+                    console.log(`--DEBUG-- workorder ${newOrderNum} with id ${id} was created;`);
+                    
+                    const workorderExt = workordersExtensions.find(wExt => wExt.WOID === workorder.ID);
+    
+                    if (workorderExt) {
+                        workorderExt['NewID'] = id;
+                        workorderExt['NewOrderNum'] = newOrderNum;
+
+                        let workordersExtensionCreateQuery = getQueries(workorderExt, 'createFullWorkorderExtension');
+            
+                        await req.app.settings.db.query(workordersExtensionCreateQuery);
+                        console.log(`--DEBUG-- workorder extension ${newOrderNum} with id ${id} was created;`);
+                    }
+    
+                    const completeItem = complete.find(c => c.WOID === workorder.ID);
+                    
+                    if (completeItem) {
+                        completeItem['NewID'] = id;
+                        completeItem['NewOrderNum'] = newOrderNum;
+    
+                        let completeOrderCreateQuery = getQueries(completeItem, 'createFullComplete');
+                        console.log('--DEBUG-- completed query is ready! ', completeOrderCreateQuery);
+
+                        await req.app.settings.db.query(completeOrderCreateQuery);
+                        console.log(`--DEBUG-- complete order ${newOrderNum} with id ${id} was created;`);
+                    }
+    
+                    const uncompleteItem = uncomplete.find(c => c.WOID === workorder.ID);
+    
+                    if (uncompleteItem) {
+                        uncompleteItem['NewID'] = id;
+                        uncompleteItem['NewOrderNum'] = newOrderNum;
+    
+                        let uncompleteOrderCreateQuery = getQueries(uncompleteItem, 'createFullUncomplete');
+            
+                        console.log('--DEBUG-- uncompleted query is ready! ', uncompleteOrderCreateQuery);
+
+                        await req.app.settings.db.query(uncompleteOrderCreateQuery);
+                        console.log(`--DEBUG-- uncomplete order ${newOrderNum} with id ${id} was created;`);
+                    }
+                }
+
+                return res.status(200).send({
+                    status: 'ok'
+                });
+            } catch (err) {
+                return res.status(400).send({
+                    status: 'error',
+                    message: err.message,
+                    error: 'Error happened during \'Duplicating order\' DB operation',
+                });
+            }
+        } else {
+            return res.status(400).send({
+                status: 'error',
+                message: err.message,
+                error: 'Workorders with such Order ID doesn`t exists',
+            });
+        }
+    }
+
+    if (action === 'convert') {
+        // TAKING INFORMATION TO CREATE NEW ID AND ORDER NUM
+
+        const takeLastIdQuery = `
+            SELECT TOP 1 Quotes.ID
+            FROM Quotes
+            ORDER BY Quotes.ID DESC
+        `;
+
+        const lastOrderID = await req.app.settings.db.query(takeLastIdQuery);
+
+        let id = lastOrderID.recordset[0].ID;
+        let newOrderNum;
+
+        console.log('--DEBUG-- new id: ', id);
+
+        const takeLastOrderNumQuery = `
+            SELECT TOP 1 Quotes.OrderNum
+            FROM Quotes
+            ORDER BY Quotes.OrderNum DESC
+        `;
+
+        const lastOrderNum = await req.app.settings.db.query(takeLastOrderNumQuery);
+        
+        newOrderNum = lastOrderNum.recordset[0].OrderNum;
+
+        console.log('--DEBUG-- highest quote num: ', newOrderNum);
+        newOrderNum++;
+
+        //////////////////////////////////////////////////////////////////////////////
+
+
+        if (workorders && workorders.length) {
+            try {
+                for (let workorder of workorders) {
+                    id++;
+                    workorder['NewID'] = id;
+                    workorder['NewOrderNum'] = newOrderNum;
+                    workorder['TableName'] = 'Quotes';
+
+                    let workorderCreateQuery = getQueries(workorder, 'createFullWorkorder');
+        
+                    await req.app.settings.db.query(workorderCreateQuery);
+                    console.log(`--DEBUG-- quote ${newOrderNum} with id ${id} was created;`);
+                    
+                    const workorderExt = workordersExtensions.find(wExt => wExt.WOID === workorder.ID);
+    
+                    if (workorderExt) {
+                        workorderExt['NewID'] = id;
+                        workorderExt['NewOrderNum'] = newOrderNum;
+
+                        let workordersExtensionCreateQuery = getQueries(workorderExt, 'createFullWorkorderExtension');
+            
+                        await req.app.settings.db.query(workordersExtensionCreateQuery);
+                        console.log(`--DEBUG-- workorder extension for quote ${newOrderNum} with id ${id} was created;`);
+                    }
+    
+                    const uncompleteItem = uncomplete.find(c => c.WOID === workorder.ID);
+    
+                    if (uncompleteItem) {
+                        uncompleteItem['NewID'] = id;
+                        uncompleteItem['NewOrderNum'] = newOrderNum;
+    
+                        let uncompleteOrderCreateQuery = getQueries(uncompleteItem, 'createFullUncomplete');
+            
+                        console.log('--DEBUG-- uncompleted query is ready! ', uncompleteOrderCreateQuery);
+
+                        await req.app.settings.db.query(uncompleteOrderCreateQuery);
+                        console.log(`--DEBUG-- uncomplete quote ${newOrderNum} with id ${id} was created;`);
+                    } else {
+                        let createUncompleteQuery = getQueries({
+                            id,
+                            orderNum,
+                            deliveryDate,
+                            location: ''
+                        }, 'createUncomplete');
+
+                        console.log('--DEBUG-- new uncompleted query is ready! ', createUncompleteQuery);
+
+                        await req.app.settings.db.query(createUncompleteQuery);
+                        
+                        console.log(`--DEBUG-- new uncomplete quote ${newOrderNum} with id ${id} was created;`);
+                    }
+                }
+
+                // DELETING ORDER THAT WAS CONVERTED
+
+                let deleteComplete;
+                let deleteUncomplete;
+                let deleteOrderExtensionsQuery;
+                let deleteOrdersQuery;
+
+                console.log(`--DEBUG-- order with number: ${orderNum} will be deleted`);
+
+                try {
+                    deleteComplete = `DELETE FROM stairs_server.dbo.Complete WHERE WONUM=${orderNum}`;
+                    deleteUncomplete = `DELETE FROM stairs_server.dbo.Uncomplete WHERE WONUM=${orderNum}`;
+                    deleteOrderExtensionsQuery = `DELETE FROM WorkOrderExtensions WHERE WONum=${orderNum}`;
+                    deleteOrdersQuery = `DELETE FROM Workorders WHERE OrderNum=${orderNum}`;
+                
+                    await Promise.all([
+                        req.app.settings.db.query(deleteComplete),
+                        req.app.settings.db.query(deleteUncomplete),
+                        req.app.settings.db.query(deleteOrdersQuery),
+                        req.app.settings.db.query(deleteOrderExtensionsQuery),
+                    ]);
+                    console.log(`--DEBUG-- orders with number: ${orderNum} were deleted`);
+                } catch (err) {
+                    return res.status(400).send({
+                        status: 'error',
+                        message: err.message,
+                        error: 'Error happened during \'Deleting order\' DB operation',
+                    });
+                }
+
+                //////////////////////////////////////////////////////////////////////////////
+
+                return res.status(200).send({
+                    status: 'ok'
+                });
+            } catch (err) {
+                return res.status(400).send({
+                    status: 'error',
+                    message: err.message,
+                    error: 'Error happened during \'Duplicating order\' DB operation',
+                });
+            }
+        } else {
+            return res.status(400).send({
+                status: 'error',
+                message: err.message,
+                error: 'Workorders with such Order ID doesn`t exists',
+            });
+        }
+    }
+
+    return res.status(400).send({
+        status: 'error',
+        message: err.message,
+        error: 'Choose correct action!',
+    });
+}
+
+
 module.exports = {
     getOrders,
     createOrder,
@@ -1059,4 +1477,5 @@ module.exports = {
     removeImage,
     getDefaultImages,
     getSalesOrdersByNumber,
+    duplicate,
 }

@@ -9,6 +9,7 @@ router.get('/sales/:orderNumber', authMiddleware, ordersHandler.getSalesOrdersBy
 router.get('/', authMiddleware, ordersHandler.getOrders);
 router.get('/images/default', authMiddleware, ordersHandler.getDefaultImages);
 router.post('/', authMiddleware, ordersHandler.createOrder);
+router.post('/duplicate/:action', authMiddleware, ordersHandler.duplicate);
 router.post('/stair', authMiddleware, ordersHandler.createOrder);
 router.post('/image/:id', authMiddleware, ordersHandler.uploadImage);
 router.delete('/image/:orderID/:id', authMiddleware, ordersHandler.removeImage);

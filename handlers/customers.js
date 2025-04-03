@@ -1,12 +1,12 @@
 const getCustomersForDropdown = async (req, res, next) => {
     const q = req.query;
     const name = q.customer || '';
-    let whereStatement = ``;
+    let whereStatement = `WHERE Deleted=0`;
 
     let searchCustomersQuery;
 
     if (name) {
-        whereStatement = `WHERE Customers.Name LIKE '%${name}%'`;
+        whereStatement += ` AND Customers.Name LIKE '%${name}%'`;
     }
 
     searchCustomersQuery = `
@@ -33,10 +33,10 @@ const getAllCustomers = async (req, res, next) => {
     const sortingDirection = q.sortingDirection || 'asc';
     const searchField = q.searchField;
     const search = q.search;
-    let whereStatement = `WHERE`;
+    let whereStatement = `WHERE Deleted=0`;
     
     if (searchField) {
-        whereStatement += ` ${searchField} LIKE '%${search}%'`;
+        whereStatement += ` AND ${searchField} LIKE '%${search}%'`;
     }
 
     let searchCountQuery;
@@ -46,13 +46,14 @@ const getAllCustomers = async (req, res, next) => {
             SELECT 
                 COUNT(DISTINCT Customers.ID) AS 'total' 
             FROM Customers
-            ${whereStatement.length === 5 ? '' : whereStatement}
+            ${whereStatement}
         `;
     } else {
         searchCountQuery = `
             SELECT 
                 COUNT(DISTINCT Customers.ID) AS 'total' 
             FROM Customers
+            ${whereStatement}
         `;
     }
 
@@ -64,7 +65,7 @@ const getAllCustomers = async (req, res, next) => {
             Customers.Comments,
             Customers.Deck_Material
         FROM Customers
-        ${whereStatement.length === 5 ? '' : whereStatement}
+        ${whereStatement}
         ORDER BY ${sortingColumn} ${sortingDirection}
         OFFSET ${ pageSize * pageIndex } ROWS FETCH NEXT ${pageSize} ROWS ONLY;
     `;
@@ -100,13 +101,14 @@ const addCustomer = async (req, res, next) => {
     const takeLastCustomerQuery = `
         SELECT TOP 1 Customers.ID
         FROM Customers
+        WHERE Deleted=0
         ORDER BY Customers.ID DESC
     `;
 
     const checkCustomerWithSameNameQuery = `
         SELECT Customers.Name
         FROM Customers
-        WHERE Customers.Name=${name}
+        WHERE Customers.Name=${name} AND DELETED=0
     `;
 
     const customerWithSameName = await req.app.settings.db.query(checkCustomerWithSameNameQuery);
@@ -209,7 +211,13 @@ const deleteCustomer = async (req, res, next) => {
     const id = params.id;
     let deleteCustomerQuery;
 
-    deleteCustomerQuery = `DELETE FROM stairs.dbo.Customers WHERE ID=${id}`;
+    // deleteCustomerQuery = `DELETE FROM stairs.dbo.Customers WHERE ID=${id}`;
+    deleteCustomerQuery = `UPDATE
+            stairs.dbo.Customers
+        SET
+            Deleted=1
+        WHERE
+            ID=${id}`;
 
     try {
         await req.app.settings.db.query(deleteCustomerQuery);

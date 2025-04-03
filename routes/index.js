@@ -15,4 +15,5 @@ router.get('/api/config', authMiddleware, (req, res) => {
     });
 });
 
+
 module.exports = router;

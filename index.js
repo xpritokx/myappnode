@@ -87,6 +87,7 @@ app.post('/api/auth', (req, res) => {
 });
 
 app.set('db', sql);
+app.set('loggedUsers: ', {});
 
 app.use('/', routes);
 app.use('/api/auth', authRoutes);
